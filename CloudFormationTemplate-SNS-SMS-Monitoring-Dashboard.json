@@ -1,0 +1,175 @@
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+	"Description": "Amazon SNS SMS Detailed Monitoring Dashboard",
+
+	"Parameters": {
+
+	},
+	"Mappings": {
+	},
+	"Conditions": {
+
+	},
+	"Resources": {
+        "CustomWidgetLambdaExecutionRole":{
+            "Type" : "AWS::IAM::Role",
+            "Properties" : {
+                "AssumeRolePolicyDocument" : {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "123",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Description" : "Lambda Execution Role for custom widgets of SNS SMS Detailed Monitoring Dashboard",
+                "ManagedPolicyArns" : [ "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"],
+                "Policies" : [ {
+                    "PolicyDocument" : {
+                        "Version": "2012-10-17",
+                        "Statement": [
+                            {
+                                "Sid": "IamListAccess",
+                                "Effect": "Allow",
+                                "Action": [
+                                    "cloudwatch:GetMetricData",
+                                    "logs:StartQuery","logs:GetQueryResults"
+                                ],
+                                "Resource": "*"
+                            }
+                        ]
+                    },
+                    "PolicyName" : "CustomWidgetLambdaExecutionRolePolicy"
+                  }
+                   ],
+                "RoleName" : "CustomWidgetLambdaExecutionRole",
+                "Tags" : [ {
+                    "Key" : "CW-CustomDashboard",
+                    "Value" : "SNS-SMS-Detailed-Monitoring-Dashboard"
+                  } ]
+              }
+          },
+          "CustomWidgetGetMetricDataSNSSuccessRate": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "ZipFile": "// CloudWatch Custom Widget sample: display CloudWatch metric data as a table\n\nconst aws = require('aws-sdk');\n\n\nconst DOCS = `\n\n## Display CloudWatch metric data in a table\n\nRetrieves data from CloudWatch metric API and displays the datapoint\nvalues in a table.\n\n\n### Widget parameters\n\nParam | Description\n\n---|---\n\n**MetricDataQueries** | An array of\n[MetricDataQuery](https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_MetricDataQuery.html)\ndefinitions, same parameter that [GetMetricData\nAPI](https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_GetMetricData.html)\nexpects\n\n**region** | The region to call to get the data\n\n\n### Example parameters\n\n\\`\\`\\` yaml\n\nMetricDataQueries:\n\n- Expression: SEARCH('{AWS/SNS,Country\\, SMSType}\nMetricName=\"SMSSuccessRate\"', 'Sum',\n    300)\n  Id: sns\n  ReturnData: false\n- Expression: SORT(sns, SUM, DESC)\n  Label: ''\n  Id: sort\nregion: ${process.env.AWS_REGION}\n\n\\`\\`\\`\n\n`;\n\n\nconst CSS =\n`<style>td,th{font-family:Arial,sans-serif;font-size:12px;white-space:nowrap;text-align:center;padding:3px;border-bottom:1px\nsolid\n#f2f2f2}td:first-child{text-align:right}tr:hover{background:#fbf8e9!important;transition:all\n.1s ease-in-out}tbody\ntr:nth-child(even){background:#f5f5f5;box-shadow:0 1px 0\nrgba(255,255,255,.8) inset}th{text-align:left;text-shadow:0 1px 0\nrgba(255,255,255,.5);border-bottom:1px solid\n#ccc;background-color:#dce9f9;background-image:linear-gradient(top,#ebf3fc,#dce9f9)}th:first-child{border-radius:6px\n0 0 0}th:last-child{border-radius:0 6px 0\n0}th:only-child{border-radius:6px 6px 0 0}</style>`;\n\n\nfunction orderData(dataSampleCount, dataSUM)\n\n{\n        const allTimestampsToValues = [];\n        let allTimestamps = {};\n\n    dataSampleCount.forEach((metricResult,j) => {\n        const timestampsToValues = {};\n        metricResult.Timestamps.forEach((timestamp, i) => {\n           allTimestamps[timestamp] = []\n           timestampsToValues[timestamp] = 'Sent: '+ metricResult.Values[i]+' Delivered: '+ dataSUM[j]['Values'][i];\n       });\n       allTimestampsToValues.push(timestampsToValues);\n    });\n\n return { allTimestamps: Object.keys(allTimestamps).sort(), allTimestampsToValues };\n}\n\n\n\nconst tableStart = allTimestamps => {\n    const timestamps = allTimestamps.map(timestamp => {\n        const d = new Date(timestamp);\n        const mo = new Intl.DateTimeFormat('en', { month: 'short' }).format(d);\n        const da = new Intl.DateTimeFormat('en', { day: '2-digit' }).format(d);\n        const h = d.getHours();\n        const m = '0' + new Intl.DateTimeFormat('en', { minute: '2-digit' }).format(d);\n        return `${mo} ${da}<br>${h}:${m.slice(-2)}`;\n    }).join('</th><th>');\n    return `<table class=\"cwdb-no-default-styles\"><thead><tr><th></th><th>${timestamps}</td></tr></thead>`;\n};\n\n\nexports.handler = async (event) => {\n    console.log(event);\n    if (event.describe) {\n        return DOCS;   \n    }\n\n    const widgetContext = event.widgetContext;\n    const timeRange = widgetContext.timeRange.zoom || widgetContext.timeRange;\n    const start = new Date(timeRange.start);\n    const end = new Date(timeRange.end);\n    \n    const MetricDataQueriesSent = [\n    {\n      Expression: `SEARCH('{AWS/SNS,Country, SMSType} MetricName=\"SMSSuccessRate\"', 'SampleCount', 86400)`,\n      Id: 'sns',\n      ReturnData: false\n    },\n    { Expression: 'SORT(sns, SUM, DESC)', Label: '', Id: 'sort' }\n  ]\n    \n    const paramsSent = { \n        MetricDataQueries: MetricDataQueriesSent,\n        StartTime: start, \n        EndTime: end\n    }; \n    const region = event.region;\n\n    const cloudwatch = new aws.CloudWatch({ region });\n    const gmdResponseSent  = await cloudwatch.getMetricData(paramsSent).promise(); \n    const dataSent = gmdResponseSent.MetricDataResults;\n    \n    const MetricDataQueriesDelivered = [\n    {\n      Expression: `SEARCH('{AWS/SNS,Country, SMSType} MetricName=\"SMSSuccessRate\"', 'Sum', 86400)`,\n      Id: 'sns',\n      ReturnData: false\n    },\n    { Expression: 'SORT(sns, SUM, DESC)', Label: '', Id: 'sortCount' }\n  ]\n    \n    const paramsDelivered = { \n        MetricDataQueries: MetricDataQueriesDelivered,\n        StartTime: start, \n        EndTime: end\n    }; \n    const gmdResponseDelivered  = await cloudwatch.getMetricData(paramsDelivered).promise(); \n    const dataDelivered = gmdResponseDelivered.MetricDataResults;\n\n    console.log(dataSent);\n    console.log(dataDelivered);\n    \n    const { allTimestamps, allTimestampsToValues } = orderData(dataSent,dataDelivered);\n    console.log(JSON.stringify(allTimestampsToValues));\n    const metricRows = dataDelivered.map((metricResult, i) => {\n        let html = `<tr><td><b>${metricResult.Label}</b></td>`;\n        let orderedMetricData = allTimestampsToValues[i];\n        const values = allTimestamps.map(timestamp => {\n            const value = orderedMetricData[timestamp];\n            return value === undefined ? '' : '' + value;\n        });\n        html += `<td>${values.join('</td><td>')}</td></tr>`;\n        return html;\n    });\n    \n\n\n    return CSS + tableStart(allTimestamps) + `<tbody>${metricRows.join('')} </tbody></table>`;    \n};\n"
+                },
+                "Description": "AWS Lambda function for fetching data from SNS Success Rate CW Metric for SNS SMS Detailed Monitoring Dashboard",
+                "FunctionName": "CustomWidget-GetMetricData-SNS-SuccessRate",
+                "Handler": "index.handler",
+                "MemorySize": 256,
+                "Role": {
+                    "Fn::GetAtt": [
+                        "CustomWidgetLambdaExecutionRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "nodejs16.x",
+                "Timeout": 90,
+                "Tags" : [ {
+                    "Key" : "CW-CustomDashboard",
+                    "Value" : "SNS-SMS-Detailed-Monitoring-Dashboard"
+                  } ]
+            }
+        },
+        "CustomWidgetFetchSMSLogs": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                   "ZipFile": "const aws = require('aws-sdk')\nconst CHECK_QUERY_STATUS_DELAY_MS = 250;\nconst CSS = '<style>td { white-space: nowrap; }</style>'\nconst ORIGINAL_QUERY = 'fields status as DeliveryStatus ,notification.timestamp as Time, notification.messageId as MessageId, delivery.smsType as SMSType, delivery.providerResponse as ProviderResponse, delivery.destination as PhoneNumber \\n| sort @timestamp desc \\n| limit 20 ';\n\nvar messageTypeFilter = null;\nvar deliveryStatusFilter = null;\nvar phoneNumberFilter = null;\nvar countryFilter = null;\nvar providerResponseFilter = null;\nvar region = process.env.AWS_REGION;\nconst runQuery = async (logsClient, logGroups, queryString, startTime, endTime) => {\n    const startQuery = await logsClient.startQuery({\n            logGroupNames: logGroups.replace(/\\s/g, '').split(','),\n            queryString,\n            startTime,\n            endTime\n        }).promise();\n    const queryId = startQuery.queryId;\n\n    while (true) {\n        const queryResults = await logsClient.getQueryResults({ queryId }).promise();\n        if (queryResults.status !== 'Complete') {\n            await sleep(CHECK_QUERY_STATUS_DELAY_MS);     // Sleep before calling again\n        } else {\n            return queryResults.results;\n        }\n    }\n};\n\nconst sleep = async (delay) => {\n    return new Promise((resolve) => setTimeout(resolve, delay));\n};\n\nconst displayResults = async (logGroups, query, results, context) => {\n    let html = `\n        <form><table>\n       \n            <tr>\n                <td>Log Groups</td><td><input name=\"logGroups\" value=\"${logGroups}\" size=\"100\"></td>\n            </tr><tr>\n                <td valign=top>Query</td><td><textarea name=\"query\" rows=\"4\" cols=\"80\">${query}</textarea></td>\n            </tr><tr>\n            \n            <td>Destination Country Dialing Code e.g. +91 (Optional filter)</td><td><input name=\"destinationCountry\" value=\"\" size=\"100\" placeholder = \"e.g. +91 for India\"></td>\n            </tr><tr>\n            <td>Message Type i.e Transactional/Promotional (Optional filter)</td><td><select name = \"messageType\"> \n                <option value=\"Nofilter\">No Filter</option>\n                <option value=\"Transactional\">Transactional</option>\n                <option value=\"Promotional\">Promotional</option>\n                </select></td>\n            </tr><tr>\n            <td>Delivery Status i.e SUCCESS/FAILURE (Optional filter)</td><td><select name = \"deliveryStatus\"> \n                <option value=\"None\">None</option>\n                <option value=\"SUCCESS\">SUCCESS</option>\n                <option value=\"FAILURE\">FAILURE</option>\n                </select></td>\n            </tr><tr>\n            <td>Phone Number (Optional filter)</td><td><input name=\"phoneNumber\" value=\"\" size=\"100\" placeholder = \"comma seperated e.g. +918588099000,+910123456789\"></td>\n             </tr>\n             <tr>\n            <td>SNS Provider Response (Optional filter)</td><td><input name=\"providerResponse\" value=\"\" size=\"100\" placeholder = \"pass any specific SNS provider response e.g. 'Message has been accepted by phone'\"></td>\n            </tr>\n        </table></form>\n        <a class=\"btn btn-primary\">Run query</a>\n        <cwdb-action action=\"call\" endpoint=\"${context.invokedFunctionArn}\">\n     \n        </cwdb-action>\n        <a class=\"btn\">Reset to original query</a>\n        <cwdb-action action=\"call\" endpoint=\"${context.invokedFunctionArn}\">\n            { \"resetQuery\": true }\n        </cwdb-action>\n        <p>\n        <h2>Results</h2>\n    `;\n    const stripPtr = result => result.filter(entry => entry.field !== '@ptr');\n\n    if (results && results.length > 0) {\n        const cols = stripPtr(results[0]).map(entry => entry.field);\n        \n        html += `<table><thead><tr><th>${cols.join('</th><th>')}</th></tr></thead><tbody>`;\n  \n        results.forEach(row => {\n            const vals = stripPtr(row).map(entry => entry.value);\n            html += `<tr><td>${vals.join('</td><td>')}</td></tr>`;\n        });\n  \n        html += `</tbody></table>`\n    } else {\n        html += `<pre>${JSON.stringify(results, null, 4)}</pre>`;\n    }\n    \n    return html;\n};\n\nexports.handler = async (event, context) => {\n    // console.log(event);\n    const Region = process.env.AWS_REGION;\n        const DOCS = `\n    ## Run Logs Insights Query\n    Runs a Logs Insights query and displays results in a table.\n    \n    ### Widget parameters\n    Param | Description\n    ---|---\n    **logGroups** | The log groups (comma-separated) to run query against\n    **query** | The query to run\n    **region** | The region to run the query in\n    \n    ### Example parameters\n    \\`\\`\\` yaml\n    \n    logGroups: sns/${process.env.AWS_REGION}/${context.invokedFunctionArn.split(':')[4]}/DirectPublishToPhoneNumber,sns/${process.env.AWS_REGION}/${context.invokedFunctionArn.split(':')[4]}/DirectPublishToPhoneNumber/Failure\n    query: 'fields status as DeliveryStatus ,notification.timestamp as Time, notification.messageId as MessageId, delivery.smsType as SMSType, delivery.providerResponse as ProviderResponse, delivery.destination as PhoneNumber \\n| sort @timestamp desc \\n| limit 20 '\n    region: ${process.env.AWS_REGION}\n    \\`\\`\\`\n    `;\n\n    if (event.describe) {\n        return DOCS;   \n    }\n\n    const widgetContext = event.widgetContext;\n    const form = widgetContext.forms.all;\n    const logGroups = form.logGroups || event.logGroups;\n    const region = widgetContext.params.region || event.region || process.env.AWS_REGION;\n    const timeRange = widgetContext.timeRange.zoom || widgetContext.timeRange;\n    const logsClient = new aws.CloudWatchLogs({ region });\n    const resetQuery = event.resetQuery;\n    phoneNumberFilter = widgetContext.params.phoneNumber || form.phoneNumber;\n    messageTypeFilter = widgetContext.params.messageType || form.messageType;\n    countryFilter = widgetContext.params.destinationCountry || form.destinationCountry;\n    providerResponseFilter = widgetContext.params.providerResponse || form.providerResponse;\n    deliveryStatusFilter = widgetContext.params.deliveryStatus || form.deliveryStatus;\n    console.log(form);\n\n    let query = ORIGINAL_QUERY;\n    if (messageTypeFilter != null && messageTypeFilter != \"Nofilter\") {\n        query = query.concat(' | filter delivery.smsType = \\'',messageTypeFilter,'\\'');\n    }\n    if (phoneNumberFilter!=null && phoneNumberFilter!='')\n    {\n        var array = phoneNumberFilter.split(\",\").map(String);\n        query = query.concat(' | filter delivery.destination in ',JSON.stringify(array));\n    }\n    if (providerResponseFilter!=null && providerResponseFilter!='')\n    {\n        query = query.concat(' | filter delivery.providerResponse = \\'',providerResponseFilter,'\\'');\n    }\n    if(countryFilter!='' && countryFilter!=null)\n    {\n        query = query.concat(' | filter delivery.destination like \\'',countryFilter,'\\'');\n    }\n    if(deliveryStatusFilter!=\"None\" && deliveryStatusFilter!=null)\n    {\n        query = query.concat(' | filter status like \\'',deliveryStatusFilter,'\\'');\n    }\n    \n    \n    console.log(query);\n    if (resetQuery) {\n        query = widgetContext.params.query || ORIGINAL_QUERY;\n    }\n\n    let results;\n\n    if (query && query.trim() !== '') {\n        try {\n            results = await runQuery(logsClient, logGroups, query, timeRange.start, timeRange.end);\n        } catch (e) {\n            results = e;\n        }\n    }\n\n    return CSS + await displayResults(logGroups, query, results, context);\n};\n"
+                 },
+                "Description": "AWS Lambda function for fetching SNS SMS Delivery logs for SNS SMS Detailed Monitoring Dashboard",
+                "FunctionName": "CustomWidget-Fetch-SMS-DeliveryLogs",
+                "Handler": "index.handler",
+                "MemorySize": 256,
+                "Role": {
+                    "Fn::GetAtt": [
+                        "CustomWidgetLambdaExecutionRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "nodejs16.x",
+                "Timeout": 90,
+                "Tags" : [ {
+                    "Key" : "CW-CustomDashboard",
+                    "Value" : "SNS-SMS-Detailed-Monitoring-Dashboard"
+                  } ]
+            }
+        },
+        "CustomWidgetFetchLogInsights": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "ZipFile": "const aws = require('aws-sdk')\nconst CHECK_QUERY_STATUS_DELAY_MS = 250;\nconst CSS = '<style>td { white-space: nowrap; }</style>'\nconst ORIGINAL_QUERY = 'stats count(*) as NumberOfRequests by delivery.providerResponse as ProviderResponse, delivery.smsType as MessageType'\n\nvar messageTypeFilter = null;\nvar phoneNumberFilter = null;\nvar countryFilter = null;\nvar region = process.env.AWS_REGION;\nconst runQuery = async (logsClient, logGroups, queryString, startTime, endTime) => {\n    const startQuery = await logsClient.startQuery({\n            logGroupNames: logGroups.replace(/\\s/g, '').split(','),\n            queryString,\n            startTime,\n            endTime\n        }).promise();\n    const queryId = startQuery.queryId;\n\n    while (true) {\n        const queryResults = await logsClient.getQueryResults({ queryId }).promise();\n        if (queryResults.status !== 'Complete') {\n            await sleep(CHECK_QUERY_STATUS_DELAY_MS);     // Sleep before calling again\n        } else {\n            return queryResults.results;\n        }\n    }\n};\n\nconst sleep = async (delay) => {\n    return new Promise((resolve) => setTimeout(resolve, delay));\n};\n\nconst displayResults = async (logGroups, query, results, context) => {\n    let html = `\n        <form><table>\n            <tr>\n                <td>Log Groups</td><td><input name=\"logGroups\" value=\"${logGroups}\" size=\"100\"></td>\n            </tr><tr>\n                <td valign=top>Query</td><td><textarea name=\"query\" rows=\"2\" cols=\"80\">${query}</textarea></td>\n            </tr><tr>\n            <td>Destination Country Dialing Code e.g. +91 (Optional filter)</td><td><input name=\"destinationCountry\" value=\"\" size=\"100\" placeholder = \"e.g. +91 for India. Pass the destination country dialing code to get the country specific insights.\"></td>\n            </tr>\n        </table></form>\n        <a class=\"btn btn-primary\">Run query</a>\n        <cwdb-action action=\"call\" endpoint=\"${context.invokedFunctionArn}\">\n        {\n        }\n        </cwdb-action>\n        <a class=\"btn\">Reset to original query</a>\n        <cwdb-action action=\"call\" endpoint=\"${context.invokedFunctionArn}\">\n            { \"resetQuery\": true }\n        </cwdb-action>\n        <p>\n        <h2>Results</h2>\n    `;\n    const stripPtr = result => result.filter(entry => entry.field !== '@ptr');\n\n    if (results && results.length > 0) {\n        const cols = stripPtr(results[0]).map(entry => entry.field);\n        \n        html += `<table><thead><tr><th>${cols.join('</th><th>')}</th></tr></thead><tbody>`;\n  \n        results.forEach(row => {\n            const vals = stripPtr(row).map(entry => entry.value);\n            html += `<tr><td>${vals.join('</td><td>')}</td></tr>`;\n        });\n  \n        html += `</tbody></table>`\n    } else {\n        html += `<pre>${JSON.stringify(results, null, 4)}</pre>`;\n    }\n    \n    return html;\n};\n\nexports.handler = async (event, context) => {\n    const Region = process.env.AWS_REGION;\n        const DOCS = `\n    ## Run Logs Insights Query\n    Runs a Logs Insights query and displays results in a table.\n    \n    ### Widget parameters\n    Param | Description\n    ---|---\n    **logGroups** | The log groups (comma-separated) to run query against\n    **query** | The query to run\n    **region** | The region to run the query in\n    \n    ### Example parameters\n    \\`\\`\\` yaml\n    \n    logGroups: sns/${process.env.AWS_REGION}/${context.invokedFunctionArn.split(':')[4]}/DirectPublishToPhoneNumber,sns/${process.env.AWS_REGION}/${context.invokedFunctionArn.split(':')[4]}/DirectPublishToPhoneNumber/Failure\n    query: stats count(*) as NumberOfRequests by delivery.providerResponse as ProviderResponse, delivery.smsType as MessageType\n    region: ${process.env.AWS_REGION}\n    \\`\\`\\`\n    `;\n\n    if (event.describe) {\n        return DOCS;   \n    }\n\n    const widgetContext = event.widgetContext;\n    const form = widgetContext.forms.all;\n    const logGroups = form.logGroups || event.logGroups;\n    const region = widgetContext.params.region || event.region || process.env.AWS_REGION;\n    const timeRange = widgetContext.timeRange.zoom || widgetContext.timeRange;\n    const logsClient = new aws.CloudWatchLogs({ region });\n    const resetQuery = event.resetQuery;\n    countryFilter = widgetContext.params.destinationCountry || form.destinationCountry;\n\n    console.log(form);\n\n    let query = ORIGINAL_QUERY;\n    if(countryFilter!='' && countryFilter!=null)\n    {\n        query = query.concat(' | filter delivery.destination like \\'',countryFilter,'\\'');\n    }\n    \n    console.log(query);\n    if (resetQuery) {\n        query = widgetContext.params.query || ORIGINAL_QUERY;\n    }\n\n    let results;\n\n    if (query && query.trim() !== '') {\n        try {\n            results = await runQuery(logsClient, logGroups, query, timeRange.start, timeRange.end);\n        } catch (e) {\n            results = e;\n        }\n    }\n\n    return CSS + await displayResults(logGroups, query, results, context);\n};\n"
+                },
+                "Description": "AWS Lambda function for fetching SNS SMS Delivery logs for SNS SMS Detailed Monitoring Dashboard",
+                "FunctionName": "CustomWidget-Fetch-SMS-DeliveryLog-Insights",
+                "Handler": "index.handler",
+                "MemorySize": 256,
+                "Role": {
+                    "Fn::GetAtt": [
+                        "CustomWidgetLambdaExecutionRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "nodejs16.x",
+                "Timeout": 90,
+                "Tags" : [ {
+                    "Key" : "CW-CustomDashboard",
+                    "Value" : "SNS-SMS-Detailed-Monitoring-Dashboard"
+                  } ]
+            }
+        },
+        "SNSSMSMonthlySpendLimitAlarm":{
+            "Type" : "AWS::CloudWatch::Alarm",
+            "Properties" : {
+                "AlarmDescription" : "SNS SMS Monthly Spend Limit Alarm to notify Users if the AWS account has reached the SNS SMS Monthly Spend Limit above the configured Threshold for the region.",
+                "AlarmName" : { "Fn::Sub": "SNS SMS Monthly Spend Limit Alarm-${AWS::Region}" } ,
+                "ComparisonOperator" : "GreaterThanOrEqualToThreshold",
+                "EvaluationPeriods" : 1,
+                "MetricName" : "SMSMonthToDateSpentUSD",
+                "Namespace" : "AWS/SNS",
+                "Period" : 300,
+                "Statistic" : "Maximum",
+                "Threshold" : 0.8,
+                "TreatMissingData" : "notBreaching"
+              }
+          },
+
+        "SNSSMSDetailedMonitoringDashboard":{
+            "Type" : "AWS::CloudWatch::Dashboard",
+            "Properties" : {
+                "DashboardBody" : {
+                 "Fn::Sub":"{\"widgets\":[{\"height\":14,\"width\":22,\"y\":16,\"x\":0,\"type\":\"custom\",\"properties\":{\"endpoint\":\"arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:customWidgetLogsInsightsQuery-js\",\"updateOn\":{\"refresh\":true,\"resize\":true,\"timeRange\":true},\"params\":{\"logGroups\":\"sns/${AWS::Region}/${AWS::AccountId}/DirectPublishToPhoneNumber,sns/${AWS::Region}/${AWS::AccountId}/DirectPublishToPhoneNumber/Failure\",\"query\":\"fields status as DeliveryStatus ,notification.timestamp as Time, notification.messageId as MessageId, delivery.smsType as SMSType, delivery.providerResponse as ProviderResponse, delivery.destination as PhoneNumber | sort @timestamp desc | limit 20 \",\"region\":\"${AWS::Region}\"},\"title\":\"Fetch SNS SMS Delivery Logs\"}},{\"height\":6,\"width\":6,\"y\":2,\"x\":0,\"type\":\"metric\",\"properties\":{\"metrics\":[[\"AWS/SNS\",\"SMSMonthToDateSpentUSD\"]],\"view\":\"timeSeries\",\"stacked\":false,\"region\":\"${AWS::Region}\",\"stat\":\"Maximum\",\"period\":300,\"title\":\"SNS SMS Monthly Spend (USD)\"}},{\"height\":2,\"width\":6,\"y\":2,\"x\":17,\"type\":\"alarm\",\"properties\":{\"title\":\"SNS SMS Monthly Spend Limit Alarm State\",\"alarms\":[\"arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:SNS SMS Monthly Spend Limit Alarm\"],\"states\":[]}},{\"height\":7,\"width\":9,\"y\":8,\"x\":0,\"type\":\"custom\",\"properties\":{\"endpoint\":\"arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:customWidgetCloudWatchMetricDataTable-js\",\"updateOn\":{\"refresh\":true,\"resize\":true,\"timeRange\":true},\"params\":{\"MetricDataQueries\":[{\"Expression\":\"SEARCH('{AWS/SNS,Country, SMSType} MetricName=SMSSuccessRate', 'Sum', 300)\",\"Id\":\"sns\",\"ReturnData\":false},{\"Expression\":\"SORT(sns, SUM, DESC)\",\"Label\":\"\",\"Id\":\"sort\"}],\"region\":\"${AWS::Region}\"},\"title\":\"Number Of SMS sent vs delivered - by Country and Message Type\"}},{\"height\":14,\"width\":20,\"y\":30,\"x\":0,\"type\":\"custom\",\"properties\":{\"endpoint\":\"arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:CustomLambdaSMSDashboardProviderResponseInsights2\",\"updateOn\":{\"refresh\":true,\"resize\":true,\"timeRange\":true},\"params\":{\"logGroups\":\"sns/${AWS::Region}/${AWS::AccountId}/DirectPublishToPhoneNumber,sns/${AWS::Region}/${AWS::AccountId}/DirectPublishToPhoneNumber/Failure\",\"query\":\"stats count(*) as NumberOfRequests by delivery.providerResponse as ProviderResponse, delivery.smsType as MessageType\",\"region\":\"${AWS::Region}\"},\"title\":\"ProviderResponse Insights by Country and Message type\"}},{\"height\":6,\"width\":11,\"y\":2,\"x\":6,\"type\":\"metric\",\"properties\":{\"view\":\"timeSeries\",\"stacked\":false,\"metrics\":[[{\"expression\":\"SEARCH('{AWS/SNS,Country,SMSType} MetricName=SMSSuccessRate', 'Average', 300)\",\"id\":\"e1\",\"region\":\"${AWS::Region}\"}]],\"region\":\"${AWS::Region}\",\"period\":300,\"liveData\":true,\"title\":\"SNS SMS Success Rate for different Countries and Message Type\"}},{\"height\":1,\"width\":24,\"y\":0,\"x\":0,\"type\":\"text\",\"properties\":{\"markdown\":\"# SNS SMS Detailed Monitoring Dashboard \\n\\n\\n\",\"background\":\"solid\"}},{\"height\":1,\"width\":17,\"y\":1,\"x\":0,\"type\":\"text\",\"properties\":{\"markdown\":\"## Metrics and Metric Insights \"}},{\"height\":1,\"width\":7,\"y\":1,\"x\":17,\"type\":\"text\",\"properties\":{\"markdown\":\"## CloudWatch Metrics Alarms\"}},{\"height\":1,\"width\":21,\"y\":15,\"x\":0,\"type\":\"text\",\"properties\":{\"markdown\":\"## CloudWatch Log Insights\"}},{\"height\":7,\"width\":8,\"y\":8,\"x\":9,\"type\":\"metric\",\"properties\":{\"metrics\":[[\"AWS/SNS\",\"NumberOfMessagesPublished\",\"TopicName\",\"${AWS::AccountId}:phone\",{\"region\":\"${AWS::Region}\"}]],\"view\":\"timeSeries\",\"stacked\":false,\"region\":\"${AWS::Region}\",\"title\":\"NumberOfMessagesPublished to Direct Phone Numbers\",\"period\":300,\"stat\":\"Sum\"}}]}"  
+                }
+                , 
+                "DashboardName" :
+                { "Fn::Sub": "SNS-SMS-Detailed-Monitoring-Dashboard-${AWS::Region}" }    
+              }
+          }
+          
+
+
+	},
+	"Outputs": {
+        "CloudWatchCustomDashboardName":{
+            "Description": "Name of the Cloudwatch Custom Dashboard created",
+			"Value": 
+            {
+                "Ref": "SNSSMSDetailedMonitoringDashboard"
+            }
+			
+        }
+      
+	}
+}
